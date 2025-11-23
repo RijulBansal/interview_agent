@@ -9,7 +9,13 @@ client = OpenAI(api_key=_api_key)
 
 def openai_generate(messages, model="gpt-4.1-mini", max_tokens=512, temperature=0.2):
     # messages: list of {"role":"system"/"user"/"assistant","content": "..."}
-    resp = client.responses.create(model=model, input=messages, max_tokens=max_tokens, temperature=temperature)
+    resp = client.responses.create(
+    model=model,
+    input=messages,
+    max_output_tokens=max_tokens,
+    temperature=temperature
+)
+
     # extract text in a safe way
     out = ""
     for item in resp.output:
