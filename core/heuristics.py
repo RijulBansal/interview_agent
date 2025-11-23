@@ -35,7 +35,8 @@ REFUSE_PATTERNS = [
     r"\bi will not answer\b",
     r"\bskip this\b",
     r"\bi cant answer that\b",
-    r"\bi can't answer that\b"
+    r"\bi can't answer that\b",
+    r"\blet us skip this\b"
 ]
 REFUSE_REGEX = re.compile("|".join(REFUSE_PATTERNS), flags=re.I)
 

@@ -13,4 +13,7 @@ class InterviewState:
 
     # NEW: store the follow-up question text here when the agent issues a follow-up
     # so that the next incoming user reply is interpreted as an answer to this follow-up.
-    pending_followup: Optional[str] = None
+    pending_followup: Optional[str] = None        # current follow-up question text
+    followup_depth: int = 0                       # how many nested followups asked for current main Q
+    MAX_FOLLOWUP_DEPTH: int = 2                   # configurable per-session value
+    followup_history: List[Dict[str,Any]] = field(default_factory=list)  # records followups asked and answers
