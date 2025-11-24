@@ -35,7 +35,7 @@ def handle_user_answer(state: InterviewState, user_answer: str):
 
     # --- Always store raw user response ---
     state.answers.append(user_answer)
-
+    
     # === Detect whether this is answering a follow-up question ===
     is_followup = False
     if getattr(state, "pending_followup", None):

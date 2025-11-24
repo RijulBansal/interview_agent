@@ -41,8 +41,8 @@ if "state" not in st.session_state:
 
 state = st.session_state.state
 
-#st.title("Interview Agent — Eightfold AI Assignment Demo")
-#st.caption("Built using your custom agentic interview pipeline.")
+st.title("Interview Agent — Eightfold AI Assignment Demo")
+st.caption("Built using your custom agentic interview pipeline.")
 
 # >>> ADDED: keep current answer text & spoken questions in session
 if "answer_text" not in st.session_state:
@@ -105,15 +105,16 @@ if audio_data is not None:
 
             with st.spinner("Transcribing your answer..."):
                 transcript = client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file,
+                    model="whisper-1",
+                    file=audio_file,
+                    language="en",          #force English
                 )
 
-            # Put recognized text into the textbox for confirmation/editing
             st.session_state.answer_text = transcript.text
             st.rerun()
         except Exception as e:
             st.warning(f"Transcription failed: {e}")
+
 
 
 col1, col2, col3, col4 = st.columns(4)

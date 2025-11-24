@@ -17,3 +17,4 @@ class InterviewState:
     followup_depth: int = 0                       # how many nested followups asked for current main Q
     MAX_FOLLOWUP_DEPTH: int = 2                   # configurable per-session value
     followup_history: List[Dict[str,Any]] = field(default_factory=list)  # records followups asked and answers
+    topic_escape_count: int = 0
