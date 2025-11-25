@@ -28,6 +28,7 @@ REFUSE_PATTERNS = [
     r"\bi cannot answer\b",
     r"\bi dont want to answer\b",
     r"\bi don't want to answer\b",
+    r"\bi don't wish to answer\b",
     r"\bi dont want to\b",
     r"\bi don't want to\b",
     r"\bi wont answer\b",

@@ -15,6 +15,73 @@ from openai import OpenAI
 client = OpenAI()  
 from streamlit_mic_recorder import mic_recorder
 from io import BytesIO  # >>> ADDED
+import base64
+import streamlit.components.v1 as components
+from core.final_summary import generate_final_feedback_with_llm
+
+
+# --- Demo question scripts for testing audio and other ui components ---
+
+def get_demo_questions(role: str, mode: str):
+    # normalise
+    role = (role or "").lower()
+    mode = (mode or "").lower()
+
+    # SALES ROLE (normal)
+    if role == "sales_associate":
+        return [
+            "Tell me about a time you successfully convinced a hesitant customer to make a purchase.",
+            "How do you typically handle customer objections?",
+            "Can you give an example of turning a frustrated customer into a satisfied one?",
+        ]
+
+    # SOFTWARE ENGINEER — BRIEF MODE
+    if role == "software_engineer" and mode == "brief":
+        return [
+    "Tell me about a Python project you’re proud of.",
+    "What improvement did you implement that made the model faster?",
+    "Explain OOP in C++.",
+    "Can you give a real example from your own code?",
+    "How do you approach debugging a segmentation fault?",
+    "Did you debug similar issues in that project?",
+]
+
+
+    # SOFTWARE ENGINEER — NORMAL MODE
+    if role == "software_engineer" and mode == "normal":
+        return [
+            "Tell me about a Python project you’re proud of.",
+            "Explain polymorphism in OOP with an example from your own code.",
+            "How do you approach debugging a segmentation fault in C++?",
+        ]
+
+    # SOFTWARE ENGINEER — IN-DEPTH / TOUGH MODE
+    if role == "software_engineer" and mode in ("deep", "tough", "in-depth"):
+        return [
+    "Tell me about the architecture of a Python project you recently worked on.",
+    "What bottleneck did you encounter during parsing?",
+    "How did you address that contention?",
+    "Compare unique_ptr and shared_ptr.",
+    "When would you avoid shared_ptr due to overhead?",
+    "How does that analogy help explain reference counting?",
+    "Walk me through how you’d solve ‘find cycle in a directed graph.’",
+    "Can you outline the steps precisely?",
+    "Can you give a small real example?",
+    "How would you apply OOP principles consistently across both Python and C++ in the same project?",
+    "How would polymorphism differ between the two?",
+    "Which approach did you personally find easier when debugging?",
+    "How would you debug intermittent crashes in such a system?",
+    "What exact bug did ASAN help you catch last time?",
+]
+
+
+    # fallback default (if something unexpected)
+    return [
+        "Tell me about a project you are proud of.",
+        "How do you debug a production issue?",
+        "Explain a data structure you use often.",
+    ]
+
 
 # >>> ADDED: helper to convert question text to speech (MP3 bytes)
 def tts_question(text: str) -> bytes:
@@ -36,13 +103,174 @@ if "state" not in st.session_state:
             "Explain a data structure you use often."
         ]
     )
-    st.session_state.state.stage = "in_progress"
+    st.session_state.state.stage = "not_started"
     st.session_state.transcript = []  # store Q/A interactions
+
+if "last_audio_hash" not in st.session_state:
+    st.session_state.last_audio_hash = None
+
+if "played_questions" not in st.session_state:
+    st.session_state.played_questions = []
+
+if "rephrased_questions" not in st.session_state:
+    st.session_state.rephrased_questions = {}
+
+if "skills" not in st.session_state:
+    st.session_state.skills = []
+
+if "skill_input_text" not in st.session_state:
+    st.session_state.skill_input_text = ""
+
+
 
 state = st.session_state.state
 
-st.title("Interview Agent — Eightfold AI Assignment Demo")
-st.caption("Built using your custom agentic interview pipeline.")
+st.title("Interview Agent - Eightfold AI Assignment Demo")
+#st.caption("Built using your custom agentic interview pipeline.")
+
+# --- Interview Mode Selector ---
+if "interview_mode" not in st.session_state:
+    st.session_state.interview_mode = "normal"  # default
+
+mode_label = st.radio(
+    "Interview mode",
+    ["Brief (efficient)", "Normal", "In-depth"],
+    index=1,
+    horizontal=True,
+    disabled=(state.stage != "not_started"),
+)
+
+mode_map = {
+    "Brief (efficient)": "brief",
+    "Normal": "normal",
+    "In-depth": "deep",
+}
+
+selected_mode = mode_map[mode_label]
+st.session_state.interview_mode = selected_mode
+
+# keep the current state's mode in sync with the UI selection
+state.mode = selected_mode
+
+# --- Role Selector ---
+if "role" not in st.session_state:
+    st.session_state.role = state.role or "software_engineer"
+
+ROLE_OPTIONS = [
+    "Software Engineer",
+    "Sales Associate",
+    "Customer Support",
+    "Other (custom)",
+]
+
+role_label = st.selectbox(
+    "Select the role for this mock interview:",
+    ROLE_OPTIONS,
+    disabled=(state.stage != "not_started"),
+)
+
+if role_label == "Other (custom)":
+    custom_role_value = st.text_input(
+        "Enter custom role (e.g., Data Scientist, Product Manager):",
+        value=custom_role_value,
+        disabled=(state.stage != "not_started"),
+    )
+
+    st.session_state.custom_role = custom_role_value.strip()
+    # Fallback if user leaves it empty
+    selected_role = custom_role_value.strip() or "software_engineer"
+else:
+    # Map human label -> internal key
+    role_map = {
+        "Software Engineer": "software_engineer",
+        "Sales Associate": "sales_associate",
+        "Customer Support": "customer_support",
+    }
+    selected_role = role_map[role_label]
+
+# Keep both session + state in sync
+st.session_state.role = selected_role
+state.role = selected_role
+
+# --- Skills to Focus On ---
+st.subheader("Skills you want to test")
+
+skills_disabled = (state.stage != "not_started")
+
+row1, row2 = st.columns([3, 1])
+
+with row1:
+    skill_input = st.text_input(
+        "Add a skill (e.g., DSA, System Design, Communication):",
+        value=st.session_state.skill_input_text,
+        key="skill_input",
+        disabled=skills_disabled,
+    )
+
+with row2:
+    add_skill = st.button("Add skill", disabled=skills_disabled)
+
+# Add skill when button clicked
+if add_skill and not skills_disabled:
+    new_skill = (skill_input or "").strip()
+    if new_skill and new_skill not in st.session_state.skills:
+        st.session_state.skills.append(new_skill)
+    # clear the *separate* value holder, not the widget key
+    st.session_state.skill_input_text = ""
+    st.rerun()
+
+# Show skills as small removable tags
+if st.session_state.skills:
+    st.caption("Skills selected:")
+
+    chip_cols = st.columns(min(len(st.session_state.skills), 4) or 1)
+
+    for i, skill in enumerate(st.session_state.skills):
+        col = chip_cols[i % len(chip_cols)]
+        with col:
+            if skills_disabled:
+                st.markdown(f"`{skill}`")
+            else:
+                if st.button(f"❌ {skill}", key=f"skill_tag_{i}"):
+                    st.session_state.skills.remove(skill)
+                    st.rerun()
+
+st.markdown("---")
+
+# --- Start Interview Button ---
+if state.stage == "not_started":
+    if st.button("🚀 Start Interview"):
+        '''
+        # Hard-code the questions based on selected role + mode
+        state.questions = get_demo_questions(
+            role=state.role,
+            mode=getattr(state, "mode", "normal")
+        )
+        '''
+        # reset state for a fresh run
+        state.stage = "in_progress"
+        state.current_question_index = 0
+        state.answers = []
+        state.evaluations = []
+        state.pending_followup = None
+        state.followup_depth = 0
+        state.followup_history = []
+        state.topic_escape_count = 0
+
+        # reset UI/session-level things
+        st.session_state.transcript = []
+        st.session_state.answer_text = ""
+        st.session_state.spoken_questions = {}
+        st.session_state.played_questions = []
+
+        st.rerun()
+
+
+# If interview not started yet, stop here (no questions, no TTS, no answer box)
+if state.stage == "not_started":
+    st.info("Select role and mode, then click **Start Interview** to begin.")
+    st.stop()
+
 
 # >>> ADDED: keep current answer text & spoken questions in session
 if "answer_text" not in st.session_state:
@@ -53,13 +281,18 @@ if "spoken_questions" not in st.session_state:
     st.session_state.spoken_questions = {}
 
 # --- Retrieve Current Prompt (Question / Follow-up) ---
-# --- Retrieve Current Prompt (Question / Follow-up) ---
 if state.pending_followup:
+    # For follow-ups we always show the exact follow-up text
     current_prompt = state.pending_followup
     st.info(f"Follow-up Question: {current_prompt}")
 else:
-    current_prompt = state.questions[state.current_question_index]
-    st.info(f"Main Question {state.current_question_index + 1}: {current_prompt}")
+    # For main questions, allow a rephrased version to override the display text
+    q_idx = state.current_question_index
+    base_q = state.questions[q_idx]
+    rephrased_map = st.session_state.get("rephrased_questions", {})
+    current_prompt = rephrased_map.get(q_idx, base_q)
+    st.info(f"Main Question {q_idx + 1}: {current_prompt}")
+
 
 # >>> ADDED: Text-to-Speech for the agent (read the question/follow-up)
 if current_prompt not in st.session_state.spoken_questions:
@@ -71,7 +304,28 @@ if current_prompt not in st.session_state.spoken_questions:
             st.warning(f"Could not generate audio for question: {e}")
 
 audio_bytes = st.session_state.spoken_questions.get(current_prompt)
+
+# --- Auto-play on first time, keep player for replay ---
+if "played_questions" not in st.session_state:
+    # store as list so it's JSON-serializable
+    st.session_state.played_questions = []
+
 if audio_bytes:
+    # auto-play the first time this question appears
+    if current_prompt not in st.session_state.played_questions:
+        b64 = base64.b64encode(audio_bytes).decode()
+        components.html(
+            f"""
+            <audio autoplay>
+                <source src="data:audio/mp3;base64,{b64}" type="audio/mpeg">
+            </audio>
+            """,
+            height=0,
+            width=0,
+        )
+        st.session_state.played_questions.append(current_prompt)
+
+    # normal Streamlit audio player so user can replay the question
     st.audio(audio_bytes, format="audio/mp3")
 
 
@@ -88,36 +342,48 @@ answer = st.text_area(
 
 st.write("Or record your answer with your voice:")
 
-# >>> ADDED: voice recording using mic_recorder
+# --- Voice Input Section (mic recorder) ---
 audio_data = mic_recorder(
     start_prompt="🎤 Start recording",
     stop_prompt="⏹ Stop",
     key="mic_recorder",
 )
 
-# When we have recorded audio, let user transcribe it into the text box
-if audio_data is not None:
-    if st.button("Transcribe Recording"):
-        try:
-            from io import BytesIO
-            audio_file = BytesIO(audio_data["bytes"])
-            audio_file.name = "answer.wav"
+# --- Auto-transcribe as soon as recording stops ---
+if audio_data is not None and "bytes" in audio_data:
+    import hashlib
+    from io import BytesIO
 
+    audio_bytes = audio_data["bytes"]
+
+    # Create hash to avoid re-transcribing the same audio after every rerun
+    current_hash = hashlib.md5(audio_bytes).hexdigest()
+
+    if current_hash != st.session_state.last_audio_hash:
+        st.session_state.last_audio_hash = current_hash
+
+        audio_file = BytesIO(audio_bytes)
+        audio_file.name = "answer.wav"
+
+        try:
             with st.spinner("Transcribing your answer..."):
                 transcript = client.audio.transcriptions.create(
                     model="whisper-1",
                     file=audio_file,
-                    language="en",          #force English
+                    language="en",
                 )
 
+            # Put text directly into the answer text area
             st.session_state.answer_text = transcript.text
+
+            # Rerun the app so the text area instantly updates
             st.rerun()
+
         except Exception as e:
             st.warning(f"Transcription failed: {e}")
 
 
-
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 
 # --- Submit Answer ---
 with col1:
@@ -137,17 +403,49 @@ with col1:
 
 
 # --- Rephrase Current Question ---
+
 with col2:
     if st.button("Rephrase"):
         from core.followup import generate_rephrase_with_llm
-        new_q = generate_rephrase_with_llm(current_prompt, state.role)
-        st.info(f"Rephrased Version:\n\n**{new_q}**")
+
+        # Decide what to rephrase: follow-up or main question
+        if state.pending_followup:
+            base_q = state.pending_followup
+        else:
+            base_q = state.questions[state.current_question_index]
+
+        new_q = generate_rephrase_with_llm(base_q, state.role)
+
+        # If this is a main question: store the rephrased version for this index
+        if not state.pending_followup:
+            st.session_state.rephrased_questions[state.current_question_index] = new_q
+        else:
+            # If we rephrased a follow-up, update the pending_followup text
+            state.pending_followup = new_q
+
+        # Ensure TTS will treat this as a fresh question to speak once
+        if "spoken_questions" in st.session_state:
+            st.session_state.spoken_questions.pop(new_q, None)
+        if "played_questions" in st.session_state and new_q in st.session_state.played_questions:
+            st.session_state.played_questions.remove(new_q)
+
+        # Rerun so the rephrased question becomes the displayed current_prompt
+        st.rerun()
+
+
 
 # --- Repeat Question ---
 with col3:
     if st.button("Repeat"):
+        # Log that the question was repeated (optional, for transcript)
         st.session_state.transcript.append({"question_repeat": current_prompt})
+
+        # Force the TTS to auto-play again for this prompt on next rerun
+        if "played_questions" in st.session_state and current_prompt in st.session_state.played_questions:
+            st.session_state.played_questions.remove(current_prompt)
+
         st.rerun()
+
 
 # --- Skip Question ---
 with col4:
@@ -155,6 +453,31 @@ with col4:
         result = handle_user_answer(state, "I don't want to answer")
         st.session_state.transcript.append(
             {"question": current_prompt, "answer": "(skipped)", "result": result}
+        )
+        st.rerun()
+
+# --- End Interview Early ---
+with col5:
+    if state.stage == "in_progress" and st.button("End Interview"):
+        # Mark finished and generate summary based on current answers/evaluations
+        state.stage = "finished"
+        summary = generate_final_feedback_with_llm(
+            state.role, state.questions, state.answers, state.evaluations
+        )
+
+        # Create a synthetic "finish" result so the existing finished-block works
+        finish_result = {
+            "action": "finish",
+            "payload": summary,
+            "state": state,
+        }
+
+        st.session_state.transcript.append(
+            {
+                "question": "(Interview ended early by user)",
+                "answer": "",
+                "result": finish_result,
+            }
         )
         st.rerun()
 
