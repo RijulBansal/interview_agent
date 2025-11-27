@@ -344,10 +344,12 @@ def create_scores_radar_chart(scores, filename="scores_radar_chart.png"):
     return filename
 '''
 #Modified criteria for evaluation
-def export_pdf(transcript, final_summary, filename="interview_report.pdf"):
+def export_pdf(transcript, final_summary, role="Software Engineer", filename="interview_report.pdf", skills=None,):
     """
     transcript: list of {"question", "answer", "result"}
     final_summary: dict returned by controller finish payload; may or may not include overall_scores
+    role: role for which the interview was conducted
+    skills: list of skills the candidate focused on (e.g. ["Python", "C++", "DSA"])
     """
     # Try to obtain scores robustly
     scores = None
@@ -383,7 +385,7 @@ def export_pdf(transcript, final_summary, filename="interview_report.pdf"):
     if not isinstance(scores, dict):
         scores = {"clarity": 3.0, "structure": 3.0, "technical_depth": 3.0, "relevance": 3.0}
 
-    # --- NEW: compute answer_ratio based on how many main questions were actually answered ---
+    # --- compute answer_ratio based on how many main questions were actually answered ---
     answer_ratio, answered_count, total_count, refused_any = compute_answer_ratio(transcript)
 
     # Build document
@@ -394,8 +396,23 @@ def export_pdf(transcript, final_summary, filename="interview_report.pdf"):
     story.append(Paragraph("Interview Report", title_style))
     story.append(Paragraph(datetime.now().strftime("%B %d, %Y"), normal_style))
     story.append(Spacer(1, 40))
-    story.append(Paragraph("Role: Software Engineer", section_style))
-    story.append(Spacer(1, 20))
+
+    # ✅ Use dynamic role here
+    role_label = role or "N/A"
+    story.append(Paragraph(f"Role: {role_label}", section_style))
+    story.append(Spacer(1, 10))
+
+    # ✅ NEW: show target skills if provided
+    if skills:
+        skills_str = ", ".join(skills)
+        story.append(Paragraph(f"Target skills: {skills_str}", normal_style))
+        story.append(Spacer(1, 20))
+    else:
+        story.append(Spacer(1, 20))
+
+    # ❌ REMOVE this old hardcoded line:
+    # story.append(Paragraph("Role: Software Engineer", section_style))
+
     story.append(PageBreak())
 
     # Transcript
@@ -432,7 +449,7 @@ def export_pdf(transcript, final_summary, filename="interview_report.pdf"):
     story.append(Image(chart_path, width=400, height=200))
     story.append(Spacer(1, 20))
 
-    # NEW: Radar / spider chart
+    # Radar / spider chart
     story.append(Paragraph("Skill Profile (Radar Chart)", normal_style))
     story.append(Spacer(1, 8))
     story.append(Image(radar_chart_path, width=300, height=300))
@@ -465,7 +482,7 @@ def export_pdf(transcript, final_summary, filename="interview_report.pdf"):
                 story.append(Paragraph(f"- {t}", normal_style))
             story.append(Spacer(1, 12))
 
-        # --- NEW: explicit note about score reduction due to refused/skipped questions ---
+        # explicit note about score reduction due to refused/skipped questions
         if total_count > 0 and answered_count < total_count:
             missed = total_count - answered_count
             if refused_any:
@@ -484,3 +501,5 @@ def export_pdf(transcript, final_summary, filename="interview_report.pdf"):
 
     doc.build(story)
     return filename
+
+

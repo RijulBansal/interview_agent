@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional
 class InterviewState:
     role: str = None
     mode: str = "normal"  # "brief" | "normal" | "deep"
+    skills: List[str] = field(default_factory=list)
     current_question_index: int = 0
     questions: List[str] = field(default_factory=list)
     answers: List[str] = field(default_factory=list)

@@ -18,6 +18,8 @@ from io import BytesIO  # >>> ADDED
 import base64
 import streamlit.components.v1 as components
 from core.final_summary import generate_final_feedback_with_llm
+from core.question_generator import generate_question_list
+
 
 
 # --- Demo question scripts for testing audio and other ui components ---
@@ -82,6 +84,78 @@ def get_demo_questions(role: str, mode: str):
         "Explain a data structure you use often.",
     ]
 
+# --- Real question bank based on role + mode + skills ---
+
+def get_questions_for(role: str, mode: str, skills: list[str]) -> list[str]:
+    role = (role or "").lower()
+    mode = (mode or "").lower()
+    skills = [s.lower() for s in (skills or [])]
+
+    # Helper to make a short skills string
+    skills_str = ", ".join(skills) if skills else "your core skills"
+
+    # SOFTWARE ENGINEER
+    if role == "software_engineer":
+        questions = []
+
+        # Always start with a project question tailored to skills
+        questions.append(
+            f"Tell me about a project you are proud of that used {skills_str}."
+        )
+
+        if mode == "brief":
+            questions.append("What data structure do you use most often and why?")
+            questions.append("Explain polymorphism in OOP in simple terms.")
+
+        elif mode == "normal":
+            questions.extend([
+                "Explain polymorphism in OOP with an example from your own code.",
+                "How do you approach debugging a segmentation fault in C++?",
+                "Describe a time when you optimized Python code for performance.",
+            ])
+
+        else:  # "deep" / in-depth
+            questions.extend([
+                "Walk me through how you would detect a cycle in a directed graph.",
+                "Compare unique_ptr and shared_ptr in C++ and explain when you would avoid shared_ptr.",
+                "How would you apply OOP principles consistently across both Python and C++ in the same project?",
+            ])
+
+        return questions
+
+    # SALES ASSOCIATE
+    if role == "sales_associate":
+        if mode == "brief":
+            return [
+                "Tell me about a time you successfully convinced a hesitant customer to make a purchase.",
+                "How do you typically handle customer objections?",
+            ]
+        elif mode == "normal":
+            return [
+                "Tell me about a time you successfully convinced a hesitant customer to make a purchase.",
+                "Can you give an example of turning a frustrated customer into a satisfied one?",
+                "How do you balance hitting sales targets with being honest with customers?",
+            ]
+        else:  # "deep"
+            return [
+                "Describe your full sales cycle for a complex, multi-stakeholder deal.",
+                "Tell me about a deal you lost. What did you learn and change afterwards?",
+            ]
+
+    # CUSTOMER SUPPORT (simple example)
+    if role == "customer_support":
+        return [
+            "Tell me about a time you handled a very frustrated customer.",
+            "How do you decide when to escalate an issue to a senior team member?",
+        ]
+
+    # fallback default
+    return [
+        "Tell me about a project you are proud of.",
+        "How do you debug a production issue?",
+        "Explain a data structure you use often.",
+    ]
+
 
 # >>> ADDED: helper to convert question text to speech (MP3 bytes)
 def tts_question(text: str) -> bytes:
@@ -124,6 +198,7 @@ if "skill_input_text" not in st.session_state:
 
 
 state = st.session_state.state
+
 
 st.title("Interview Agent - Eightfold AI Assignment Demo")
 #st.caption("Built using your custom agentic interview pipeline.")
@@ -201,13 +276,15 @@ row1, row2 = st.columns([3, 1])
 
 with row1:
     skill_input = st.text_input(
-        "Add a skill (e.g., DSA, System Design, Communication):",
+       "Add a skill (e.g., DSA, System Design, Communication):",
         value=st.session_state.skill_input_text,
         key="skill_input",
         disabled=skills_disabled,
     )
 
 with row2:
+    st.write("")            # one spacer
+    st.write("")            # second spacer (adjust if needed)
     add_skill = st.button("Add skill", disabled=skills_disabled)
 
 # Add skill when button clicked
@@ -229,25 +306,78 @@ if st.session_state.skills:
         col = chip_cols[i % len(chip_cols)]
         with col:
             if skills_disabled:
-                st.markdown(f"`{skill}`")
+                # When interview already started, show non-clickable chip
+                st.markdown(f"""
+                    <div style="
+                        display: inline-flex;
+                        align-items: center;
+                        border: 1px solid #444;
+                        background-color: #2c2c2c;
+                        padding: 2px 8px;
+                        border-radius: 8px;
+                        margin: 4px 0;
+                        font-size: 0.78rem;
+                    ">
+                        {skill}
+                    </div>
+                """, unsafe_allow_html=True)
+
             else:
-                if st.button(f"❌ {skill}", key=f"skill_tag_{i}"):
+                # Render the chip as a clickable button (styled as the chip)
+                chip_clicked = st.button(
+                    skill,
+                    key=f"skill_tag_{i}",
+                    help=f"Click to remove {skill}",
+                )
+
+                # Override Streamlit button styling using HTML injection
+                st.markdown(
+                    f"""
+                    <style>
+                    div.stButton > button[kind="secondary"][data-testid="baseButton-secondary"][aria-label="{skill}"] {{
+                        display: inline-flex;
+                        align-items: center;
+                        border: 1px solid #444 !important;
+                        background-color: #2c2c2c !important;
+                        padding: 2px 8px !important;
+                        border-radius: 8px !important;
+                        margin: 4px 0 !important;
+                        font-size: 0.78rem !important;
+                        color: #f5f5f5 !important;
+                        height: auto !important;
+                    }}
+                    </style>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                # Remove skill when clicked
+                if chip_clicked:
                     st.session_state.skills.remove(skill)
                     st.rerun()
 
 st.markdown("---")
 
+state.skills = list(st.session_state.get("skills", []))
+
 # --- Start Interview Button ---
 if state.stage == "not_started":
     if st.button("🚀 Start Interview"):
-        '''
-        # Hard-code the questions based on selected role + mode
-        state.questions = get_demo_questions(
-            role=state.role,
-            mode=getattr(state, "mode", "normal")
-        )
-        '''
-        # reset state for a fresh run
+
+        # 1. Store role, mode, and skills in backend state
+        state.role = st.session_state.get("selected_role", state.role)
+        state.mode = selected_mode
+        state.skills = list(st.session_state.get("skills", []))
+
+        # 2. Generate question list from LLM
+        with st.spinner("Generating interview questions..."):
+            state.questions = generate_question_list(
+                role=state.role,
+                mode=state.mode,
+                skills=state.skills,
+            )
+
+        # 3. Reset entire interview flow
         state.stage = "in_progress"
         state.current_question_index = 0
         state.answers = []
@@ -257,12 +387,13 @@ if state.stage == "not_started":
         state.followup_history = []
         state.topic_escape_count = 0
 
-        # reset UI/session-level things
-        st.session_state.transcript = []
+        # 4. Clear UI fields
         st.session_state.answer_text = ""
         st.session_state.spoken_questions = {}
         st.session_state.played_questions = []
+        st.session_state.transcript = []
 
+        # 5. Refresh UI
         st.rerun()
 
 
@@ -462,7 +593,7 @@ with col5:
         # Mark finished and generate summary based on current answers/evaluations
         state.stage = "finished"
         summary = generate_final_feedback_with_llm(
-            state.role, state.questions, state.answers, state.evaluations
+            state.role, state.questions, state.answers, state.evaluations, state.skills,
         )
 
         # Create a synthetic "finish" result so the existing finished-block works
@@ -522,6 +653,7 @@ if state.stage == "finished":
         pdf_path = export_pdf(
             transcript=st.session_state.transcript,
             final_summary=final_summary,
+            role=state.role,
             filename="interview_report.pdf"
         )
 

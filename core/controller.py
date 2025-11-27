@@ -55,7 +55,7 @@ def handle_user_answer(state: InterviewState, user_answer: str):
         print("[DEBUG] FOLLOW-UP MODE ACTIVE — skipping unrelated detection")
 
         # Evaluate the answer in the context of the follow-up question
-        eval_json_preview = evaluate_answer_with_llm(question_being_answered, user_answer, state.role)
+        eval_json_preview = evaluate_answer_with_llm(question_being_answered, user_answer, state.role, skills=state.skills,)
         # store the evaluation under the current question's slot
         state.evaluations[idx].update(eval_json_preview)
 
@@ -76,7 +76,7 @@ def handle_user_answer(state: InterviewState, user_answer: str):
         if state.current_question_index + 1 >= len(state.questions):
             state.stage = "finished"
             from core.final_summary import generate_final_feedback_with_llm
-            summary = generate_final_feedback_with_llm(state.role, state.questions, state.answers, state.evaluations)
+            summary = generate_final_feedback_with_llm(state.role, state.questions, state.answers, state.evaluations, state.skills,)
             return {"action": "finish", "payload": summary, "state": state}
 
         state.current_question_index += 1
@@ -104,7 +104,7 @@ def handle_user_answer(state: InterviewState, user_answer: str):
             state.stage = "finished"
             from core.final_summary import generate_final_feedback_with_llm
             summary = generate_final_feedback_with_llm(
-                state.role, state.questions, state.answers, state.evaluations
+                state.role, state.questions, state.answers, state.evaluations, state.skills,
             )
             return {"action": "finish", "payload": summary, "state": state}
         else:
@@ -170,7 +170,7 @@ def handle_user_answer(state: InterviewState, user_answer: str):
                 from core.final_summary import generate_final_feedback_with_llm
                 state.stage = "finished"
                 summary = generate_final_feedback_with_llm(
-                    state.role, state.questions, state.answers, state.evaluations
+                    state.role, state.questions, state.answers, state.evaluations, state.skills,
                 )
                 return {"action": "finish", "payload": summary, "state": state}
 
@@ -188,7 +188,8 @@ def handle_user_answer(state: InterviewState, user_answer: str):
     eval_json_preview = evaluate_answer_with_llm(
         question=question_being_answered,
         answer=user_answer,
-        role=state.role
+        role=state.role,
+        skills=state.skills,
     )
     knowledge_intent = eval_json_preview.get("knowledge_intent", "").lower()
 
@@ -202,7 +203,7 @@ def handle_user_answer(state: InterviewState, user_answer: str):
             from core.final_summary import generate_final_feedback_with_llm
             state.stage = "finished"
             summary = generate_final_feedback_with_llm(
-                state.role, state.questions, state.answers, state.evaluations
+                state.role, state.questions, state.answers, state.evaluations, state.skills,
             )
             return {"action": "finish", "payload": summary, "state": state}
 
@@ -229,6 +230,29 @@ def handle_user_answer(state: InterviewState, user_answer: str):
     eval_json = eval_json_preview
     state.evaluations[idx].update(eval_json)
 
+    # --- MODE-AWARE FOLLOW-UP DECISION ---
+    mode = getattr(state, "mode", "normal")
+
+    if mode == "brief":
+        # In brief mode we never ask extra follow-ups;
+        # just keep the evaluation and move on to next question.
+        eval_json["needs_follow_up"] = False
+
+    elif mode == "deep":
+        # In deep mode, be more aggressive with follow-ups:
+        # even if the model says no follow-up, force one when scores are low.
+        if not eval_json.get("needs_follow_up", False):
+            clarity = eval_json.get("clarity", 0) or 0
+            depth = eval_json.get("technical_depth", 0) or 0
+
+            if depth < 4 or clarity < 4:
+                eval_json["needs_follow_up"] = True
+                # choose reasonable follow-up type
+                if depth < 4:
+                    eval_json["follow_up_type"] = "depth"
+                else:
+                    eval_json["follow_up_type"] = "clarity"
+
     # If needs follow-up → ask it
     if eval_json.get("needs_follow_up") and eval_json.get("follow_up_type") != "none":
         follow_up_q = generate_followup_with_llm(
@@ -248,7 +272,7 @@ def handle_user_answer(state: InterviewState, user_answer: str):
                 state.stage = "finished"
                 from core.final_summary import generate_final_feedback_with_llm
                 summary = generate_final_feedback_with_llm(
-                    state.role, state.questions, state.answers, state.evaluations
+                    state.role, state.questions, state.answers, state.evaluations, state.skills,
                 )
                 return {"action": "finish", "payload": summary, "state": state}
             else:
@@ -285,7 +309,7 @@ def handle_user_answer(state: InterviewState, user_answer: str):
         from core.final_summary import generate_final_feedback_with_llm
         state.stage = "finished"
         summary = generate_final_feedback_with_llm(
-            state.role, state.questions, state.answers, state.evaluations
+            state.role, state.questions, state.answers, state.evaluations, state.skills,
         )
         return {"action": "finish", "payload": summary, "state": state}
 

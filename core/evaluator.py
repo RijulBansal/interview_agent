@@ -35,10 +35,12 @@ def classify_knowledge_with_llm(answer: str, question: str = "", role: str = "")
     # fallback conservative
     return {"knowledge_intent": "unknown", "reason": "could not parse classifier output"}
 
-def evaluate_answer_with_llm(question: str, answer: str, role: str, context: str = "") -> dict:
+def evaluate_answer_with_llm(question: str, answer: str, role: str, context: str = "", skills=None,) -> dict:
     # First, use heuristics to detect knowledge/refusal
     kb_intent = detect_knowledge_intent(answer)
     knowledge_obj = {"knowledge_intent_heuristic": kb_intent}
+    skills_text = ", ".join(skills) if skills else "not specified"
+
 
     # If ambiguous, fall back to LLM classifier
     if kb_intent == "unknown_ambiguous":
@@ -61,6 +63,7 @@ def evaluate_answer_with_llm(question: str, answer: str, role: str, context: str
     prompt = (
         f"{EVAL_SYS}\n\n"
         f"Role: {role}\n"
+        f"Target skills: {skills_text}\n" 
         f"Question: {question}\n"
         f"Answer: {answer}\n"
         f"Context: {context}\n\n"
